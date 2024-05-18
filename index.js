@@ -36,8 +36,8 @@ const processMovies = async (data) => {
   i = 1;
   for (const review of reviews) {
     console.log(`Testing for review ${i}`);
-    const percentage = await testReview(review.text);
-    review.is_human = percentage;
+    const percentages = await testReview(review.text);
+    review.is_human = percentages; // Adjusted to handle multiple outputs
     i++;
   }
 
@@ -67,20 +67,43 @@ const generateReview = async (movie) => {
 };
 
 const testReview = async (review) => {
-  const url = "https://api.zerogpt.com/api/detect/detectText";
-  const headers = {
+  const zeroGPTUrl = "https://api.zerogpt.com/api/detect/detectText";
+  const gptZeroUrl = "https://api.gptzero.me/v2/predict/text";
+  const headersZeroGPT = {
     "Content-Type": "application/json",
-    ApiKey: process.env.GPTZERO_API_KEY,
+    "x-api-key": process.env.ZEROGPT_API_KEY,
   };
-  const body = {
-    input_text: review,
+  const headersGPTZero = {
+    "Content-Type": "application/json",
+    "x-api-key": process.env.GPTZERO_API_KEY,
+  };
+  const bodyZeroGPT = {
+    input_text: review,  // Correct for ZeroGPT
+  };
+  const bodyGPTZero = {
+    document: review,  // Correct for GPTZero
+    version: "2024-01-09",  // Using a specific version as per the GPTZero API documentation
+    multilingual: false  // This is optional and can be set based on your needs
   };
 
   try {
-    const response = await axios.post(url, body, { headers });
-    return response.data.data.isHuman;
+    const [zeroGPTResponse, gptZeroResponse] = await Promise.all([
+      axios.post(zeroGPTUrl, bodyZeroGPT, { headers: headersZeroGPT }),
+      axios.post(gptZeroUrl, bodyGPTZero, { headers: headersGPTZero })
+    ]);
+
+    // Calculate and cap the percentage values
+    const humanProberoGPT = zeroGPTResponse.data.data ? Math.min(Math.round(zeroGPTResponse.data.data.isHuman * 100), 100) : 0;
+    const humanProbGPTZero = gptZeroResponse.data.documents[0] ? Math.min(Math.round(gptZeroResponse.data.documents[0].class_probabilities.human * 100), 100) : 0;
+
+
+    return {
+      ZeroGPT: `${humanProberoGPT * 100}% human-like content`,
+      GPTZero: `${humanProbGPTZero * 100}% human-like content`
+    };
   } catch (err) {
-    console.log(err);
+    console.error("Error in testReview:", err);
+    return { GPTZero: "Error", ZeroGPT: "Error" };  // Provide fallback error messages
   }
 };
 
