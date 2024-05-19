@@ -1,6 +1,7 @@
 const axios = require("axios");
 const fs = require("fs");
 const { OpenAI } = require("openai");
+const createCsvWriter = require('csv-writer').createObjectCsvWriter;
 require("dotenv").config();
 
 const openai = new OpenAI({
@@ -19,28 +20,20 @@ const readDataFromFile = (filePath) => {
 const processMovies = async (data) => {
   const reviews = [];
 
-  let i = 1;
   for (const movie of data) {
-    console.log(`Generating for movie ${i}`);
+    console.log(`Generating for movie ${movie.Title}`); // Log using the movie title
     const review = await generateReview(movie);
     if (review.text) {
       reviews.push({
         text: review.text,
         generation_cost: review.cost,
-        is_human: 0,
+        title: movie.Title, // Correct key for Title
+        releaseYear: movie["Release Year"], // Correct key for Release Year
+        is_human: await testReview(review.text) // Assume this returns the object with GPTZero and ZeroGPT percentages
       });
     }
-    i++;
   }
-
-  i = 1;
-  for (const review of reviews) {
-    console.log(`Testing for review ${i}`);
-    const percentages = await testReview(review.text);
-    review.is_human = percentages; // Adjusted to handle multiple outputs
-    i++;
-  }
-
+  // console.log(reviews)
   return reviews;
 };
 
@@ -71,7 +64,7 @@ const testReview = async (review) => {
   const gptZeroUrl = "https://api.gptzero.me/v2/predict/text";
   const headersZeroGPT = {
     "Content-Type": "application/json",
-    "x-api-key": process.env.ZEROGPT_API_KEY,
+    ApiKey: process.env.ZEROGPT_API_KEY,
   };
   const headersGPTZero = {
     "Content-Type": "application/json",
@@ -93,24 +86,46 @@ const testReview = async (review) => {
     ]);
 
     // Calculate and cap the percentage values
-    const humanProberoGPT = zeroGPTResponse.data.data ? Math.min(Math.round(zeroGPTResponse.data.data.isHuman * 100), 100) : 0;
+    const humanProbZeroGPT = zeroGPTResponse.data.data ? Math.min(Math.round(zeroGPTResponse.data.data.isHuman * 100), 100) : 0;
     const humanProbGPTZero = gptZeroResponse.data.documents[0] ? Math.min(Math.round(gptZeroResponse.data.documents[0].class_probabilities.human * 100), 100) : 0;
 
 
     return {
-      ZeroGPT: `${humanProberoGPT * 100}% human-like content`,
-      GPTZero: `${humanProbGPTZero * 100}% human-like content`
+      ZeroGPT: `${humanProbZeroGPT}% human-like content`,
+      GPTZero: `${humanProbGPTZero}% human-like content`
     };
   } catch (err) {
-    console.error("Error in testReview:", err);
+    console.error("Error in testReview:", err.message);
+    console.log(`Failed API call with error: ${err.response ? err.response.data : 'No response data'}`);
     return { GPTZero: "Error", ZeroGPT: "Error" };  // Provide fallback error messages
   }
+  
 };
 
 const main = async () => {
   const moviesData = readDataFromFile("data.json");
   const processedData = await processMovies(moviesData);
-  writeDataToFile("reviews.json", processedData);
-};
 
+  const csvWriter = createCsvWriter({
+    path: 'reviews.csv',
+    header: [
+      {id: 'title', title: 'TITLE'},
+      {id: 'releaseYear', title: 'RELEASE YEAR'},
+      {id: 'humanLikeGPTZero', title: 'GPTZero Human-like (%)'},
+      {id: 'humanLikeZeroGPT', title: 'ZeroGPT Human-like (%)'}
+    ]
+  });
+
+  const records = processedData.map(review => ({
+    title: review.title,
+    releaseYear: review.releaseYear,
+    humanLikeGPTZero: review.is_human.GPTZero.replace('% human-like content', ''),
+    humanLikeZeroGPT: review.is_human.ZeroGPT.replace('% human-like content', '')
+  }));
+
+  csvWriter.writeRecords(records)
+    .then(() => {
+      console.log('The CSV file was written successfully');
+    });
+};
 main().catch((err) => console.error("Error in processing:", err));
